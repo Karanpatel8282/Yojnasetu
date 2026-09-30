@@ -2,7 +2,7 @@
 
 **A bilingual Marathi NGO scheme-search & recommendation engine that ranks the most relevant Indian government schemes for a user's eligibility profile.**
 
-Built on a real corpus of **1,000 government schemes** spanning all **37 Indian states/UTs plus central**, YojanaSetu fuses free-text relevance (TF-IDF + cosine similarity) with **9 rule-based eligibility checks**, and explains *why* each scheme matches — in both English and मराठी.
+Built on a real corpus of **1,000 government schemes** spanning all **37 Indian states/UTs plus central**, YojanaSetu fuses lexical relevance (TF-IDF), multilingual semantic relevance (Sentence Transformers), and **9 rule-based eligibility checks**, then explains *why* each scheme matches — in both English and मराठी.
 
 ---
 
@@ -32,6 +32,7 @@ A scheme register isn't really a list — it's a set of *conditions*. A scheme's
 
 - **Marathi NLP preprocessing** — custom Devanagari-aware tokenizer, stopword removal, and light suffix-stripping stemmer
 - **Free-text relevance** — TF-IDF (`sublinear_tf`) + cosine similarity over each scheme's text "bag"
+- **Multilingual semantic search** — Sentence Transformer embeddings match English and Marathi meaning beyond exact keywords
 - **English→Marathi intent expansion** — English queries are translated into the Marathi index so both languages align
 - **Rule-based eligibility** — 9 explainable checks (age, gender, state, income, occupation, residence, BPL, disability, caste) with a central-scheme fallback
 - **Interactive visualization** (Streamlit) — a dark, premium bilingual dashboard that surfaces ranked, explained results in seconds
@@ -72,11 +73,11 @@ The project combines classic information retrieval with rule-based eligibility t
 | Layer | Technology | Purpose |
 |---|---|---|
 | Framework | **Streamlit** | Interactive bilingual web application layer |
-| Retrieval | **scikit-learn TF-IDF** | `sublinear_tf` vectorization + cosine similarity |
+| Retrieval | **TF-IDF + Sentence Transformers** | Lexical and multilingual semantic cosine scoring |
 | Numerical ops | **NumPy** | Sparse-matrix dot products for relevance scoring |
 | Data handling | **Pandas** | Corpus loading, normalization, and dashboard datasets |
 | Preprocessing | **Custom Python** | Marathi tokenizer, stopwords, light stemmer, intent expansion |
-| Storage | **JSON** | Cleaned 1,000-scheme dataset on disk |
+| Storage | **JSON + NumPy** | Bilingual scheme dataset and cached semantic embeddings |
 | Language | **Python** | End-to-end pipeline implementation |
 
 ## Architecture
@@ -96,14 +97,14 @@ The project combines classic information retrieval with rule-based eligibility t
               tokenize / stopwords / stem (Marathi)
                            |
                            v
-               [engine.py]  Phase 4
-                    TF-IDF index
+                 [engine.py]  Hybrid retrieval index
+                    TF-IDF + semantic embeddings
                            |
           +------------------+------------------+
           |                                     |
           v                                     v
-     cosine(query, scheme)             9 eligibility rules
-      (English→Marathi first)          age·gender·state·income
+   lexical + semantic relevance      9 eligibility rules
+    (English / Marathi query)        age·gender·state·income
                                        occupation·residence·BPL
                                        disability·caste
           +------------------+------------------+
@@ -122,8 +123,8 @@ The project combines classic information retrieval with rule-based eligibility t
 
 1. **Normalize** — messy category/state strings are mapped onto canonical bilingual tags (157→19 categories, 39→37 states)
 2. **Preprocess** — Marathi tokenizer strips punctuation, drops stopwords, and light-stems oblique suffix forms
-3. **Index** — each scheme becomes a TF-IDF text bag (`sublinear_tf` cosine)
-4. **Rank** — English queries expand into Marathi, then cosine relevance is computed against the index
+3. **Index** — each scheme becomes a TF-IDF text bag and a normalized multilingual semantic embedding
+4. **Rank** — lexical and semantic cosine scores are combined, with English intent expansion supporting the Marathi index
 5. **Check** — the user's eligibility profile is run through all 9 rules, each producing a pass/fail explanation
 6. **Blend** — `0.5·relevance + 0.5·eligibility` ranks results eligible-first
 7. **Visualize** — every result is served through the bilingual Streamlit dashboard
@@ -148,17 +149,21 @@ python -m streamlit run app.py
 ## Project Structure
 
 ```text
-scheme-retrieval-v2/
+Yojnasetu/
 │
 ├── app.py              # Streamlit UI — bilingual dashboard (run this)
 ├── engine.py           # Retrieval + eligibility + ranking engine
 ├── preprocessing.py    # Marathi tokenizer, stopwords, light stemmer
 ├── normalize.py        # Data-normalization script (Phase 2)
 ├── eval.py             # precision@K / recall@K evaluation (Phase 6)
+├── semantic.py         # multilingual Sentence Transformer embeddings
+├── merge_bilingual.py  # build the bilingual scheme dataset
 │
 ├── data/
 │   ├── schemes.json              # raw 1,000-scheme corpus (Phase 1 input)
-│   └── schemes_normalized.json   # cleaned, canonically-tagged dataset
+│   ├── schemes_normalized.json   # cleaned, canonically-tagged dataset
+│   ├── schemes_bilingual.json    # bilingual dataset used by the app
+│   └── embeddings.npy            # cached semantic vectors
 │
 ├── .streamlit/
 │   └── config.toml     # dark theme — emerald accent, Inter font
@@ -171,6 +176,8 @@ scheme-retrieval-v2/
 
 - **`app.py`** — the Streamlit app: bilingual UI strings, sidebar eligibility profile, search, result cards, and the Explore tab (reads the engine's cached index)
 - **`engine.py`** — the core ranking logic: TF-IDF build, `check_eligibility` (9 rules), and blended `rank()`; also an optional CLI `demo()` for sample queries
+- **`semantic.py`** — builds and searches multilingual Sentence Transformer embeddings, cached in `data/embeddings.npy`
+- **`merge_bilingual.py`** — merges English scheme fields with the normalized Marathi dataset
 - **`preprocessing.py`** — the NLP layer: Devanagari-safe `tokenize`, curated `MARATHI_STOPWORDS`, and light `STEM_SUFFIXES` stemmer that feed the TF-IDF tokenizer
 - **`normalize.py`** — Phase 2 cleanup: maps 157 messy categories onto 19 canonical tags and 39 state variants onto 37, appending a `categories` list per record
 - **`eval.py`** — Phase 6 evaluation: precision@K / recall@K over a hand-labeled gold set (7 queries × relevant schemes)
@@ -189,8 +196,8 @@ scheme-retrieval-v2/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-username>/scheme-retrieval-v2.git
-cd scheme-retrieval-v2
+git clone https://github.com/Karanpatel8282/Yojnasetu.git
+cd Yojnasetu
 ```
 
 ### 2. Set up a virtual environment
@@ -244,10 +251,12 @@ Each record carries 19 fields including the eligibility rule inputs (`eligibilit
 
 ## How the ranking works
 
-Each scheme becomes a text "bag" (name + category + state + description + benefits + beneficiary type), preprocessed with the Marathi pipeline and vectorized with TF-IDF (`sublinear_tf`). For a query and profile:
+Each scheme becomes a text "bag" (name + category + state + description + benefits + beneficiary type) for TF-IDF, plus a normalized multilingual embedding generated by `paraphrase-multilingual-MiniLM-L12-v2`. For a query and profile:
 
 ```text
-relevance     = cosine( query_tfidf , scheme_tfidf )   # English query expanded to Marathi first
+lexical      = cosine( query_tfidf , scheme_tfidf )   # English intent expansion supports Marathi retrieval
+semantic     = cosine( query_embedding , scheme_embedding )
+relevance    = combined lexical + semantic relevance
 eligibility   = fraction of the scheme's 9 rules the profile satisfies
    score      = 0.5·relevance + 0.5·eligibility        (when a query is given)
    score      = eligibility                            (browse mode, no query)
@@ -279,7 +288,7 @@ The blended (relevance + eligibility) ranking closely tracks the content-only (r
 - **Stopword removal** — curated Marathi function-word list (~50–70 tokens)
 - **Light stemming** — rule-based suffix stripping for Marathi oblique/postpositional forms (e.g. `शिष्यवृत्तीच्या`→`शिष्यवृत्ती`) with safety guardrails
 - **Intent expansion** — English→Marathi substitution (e.g. `farmer loan`→`शेतकरी कर्ज`) so both languages hit the same index
-- **TF-IDF + cosine similarity** — `scikit-learn`, `sublinear_tf`
+- **Hybrid retrieval** — TF-IDF lexical search plus multilingual Sentence Transformer embeddings
 - **Fused relevance + rules** — explainable hybrid scoring
 
 ## Future Scope
@@ -287,7 +296,6 @@ The blended (relevance + eligibility) ranking closely tracks the content-only (r
 - Add cross-state scheme matching for schemes currently tagged only to single states
 - Expand the corpus with English and Hindi scheme descriptions for multilingual retrieval
 - Add voice input for the search bar (Marathi speech-to-text)
-- Introduce semantic embeddings (e.g. sentence-transformers / IndicBERT) alongside TF-IDF
 - Deploy the dashboard for public access behind a free domain or Streamlit Cloud
 
 ## Author
